@@ -54,6 +54,9 @@ public struct GitVersionInfo: Sendable, Equatable {
     /// The abbreviated identifier of the current commit.
     public let commit: String
 
+    /// The full identifier of the current commit.
+    public let fullCommit: String
+
     /// The committer date of the current commit in ISO 8601 format.
     public let commitDate: String
 
@@ -75,6 +78,15 @@ public struct GitVersionInfo: Sendable, Equatable {
     /// The calculated semantic version for this build.
     public let semanticVersion: GitSemanticVersion
 
+    /// The major component of the calculated semantic version.
+    public var major: Int { semanticVersion.major }
+
+    /// The minor component of the calculated semantic version.
+    public var minor: Int { semanticVersion.minor }
+
+    /// The patch component of the calculated semantic version.
+    public var patch: Int { semanticVersion.patch }
+
     /// The semantic version string generated for this build.
     public var version: String { semanticVersion.description }
 
@@ -83,6 +95,7 @@ public struct GitVersionInfo: Sendable, Equatable {
         repositoryURL: String?,
         branch: String,
         commit: String,
+        fullCommit: String? = nil,
         commitDate: String,
         commits: Int,
         tag: String?,
@@ -94,6 +107,7 @@ public struct GitVersionInfo: Sendable, Equatable {
         self.repositoryURL = repositoryURL
         self.branch = branch
         self.commit = commit
+        self.fullCommit = fullCommit ?? commit
         self.commitDate = commitDate
         self.commits = commits
         self.tag = tag

@@ -27,6 +27,8 @@ build-tool plugin. The public API lives in `Sources/GitVersion`, the plugin in
 - Preserve behavior for tagged and untagged commits, detached checkouts, CI
   branch names, and dirty working trees. Add focused tests for version
   calculation and validate plugin behavior in an actual consumer build.
+- Expose semantic-version components and both abbreviated and full commit
+  identifiers in generated metadata.
 - Update `README.md` when package setup, generated API, or version behavior
   changes.
 

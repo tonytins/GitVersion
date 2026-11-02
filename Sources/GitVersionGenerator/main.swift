@@ -20,6 +20,7 @@ private struct RepositoryInfo {
     let repositoryURL: String?
     let branch: String
     let commit: String
+    let fullCommit: String
     let commitDate: String
     let commits: Int
     let tag: String?
@@ -192,6 +193,7 @@ private func collectInfo(repository: URL, git: GitCommand) throws -> RepositoryI
     }
     let root = URL(fileURLWithPath: rootPath, isDirectory: true)
     let commit = try git.runRequired(["rev-parse", "--short=12", "HEAD"], in: root)
+    let fullCommit = try git.runRequired(["rev-parse", "HEAD"], in: root)
     let commitDate = try git.runRequired(["show", "-s", "--format=%cI", "HEAD"], in: root)
     let exactTag = try git.run(["describe", "--tags", "--exact-match", "HEAD"], in: root)
     let baseTag = try git.run(
@@ -277,6 +279,7 @@ private func collectInfo(repository: URL, git: GitCommand) throws -> RepositoryI
         repositoryURL: repositoryURL,
         branch: branch,
         commit: commit,
+        fullCommit: fullCommit,
         commitDate: commitDate,
         commits: commitCount,
         tag: exactTag,
@@ -297,6 +300,7 @@ private func generatedSource(for info: RepositoryInfo) -> String {
             repositoryURL: \(optionalString(info.repositoryURL)),
             branch: \(String(reflecting: info.branch)),
             commit: \(String(reflecting: info.commit)),
+            fullCommit: \(String(reflecting: info.fullCommit)),
             commitDate: \(String(reflecting: info.commitDate)),
             commits: \(info.commits),
             tag: \(optionalString(info.tag)),
@@ -312,6 +316,11 @@ private func generatedSource(for info: RepositoryInfo) -> String {
             )
         )
 
+        public static let major = current.major
+        public static let minor = current.minor
+        public static let patch = current.patch
+        public static let commit = current.commit
+        public static let fullCommit = current.fullCommit
         public static let version = current.version
     }
     """

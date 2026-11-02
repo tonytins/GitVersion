@@ -27,13 +27,17 @@ The generated API is available in that target:
 ```swift
 print(GitVersion.current.branch)
 print(GitVersion.current.commit)
+print(GitVersion.current.fullCommit)
+print(GitVersion.major, GitVersion.minor, GitVersion.patch)
 print(GitVersion.current.version)
 ```
 
-`GitVersion.current` exposes the repository URL, branch, abbreviated commit,
-commit date, commit count, exact and base tags, dirty state, base version, and
-calculated semantic version. Metadata is collected for every build, so changes
-to the current checkout are reflected without requiring a clean build.
+`GitVersion.current` exposes the repository URL, branch, abbreviated and full
+commit identifiers, commit date, commit count, exact and base tags, dirty state,
+base version, and calculated semantic version. The generated `GitVersion`
+namespace also provides direct `major`, `minor`, `patch`, `commit`, and
+`fullCommit` accessors. Metadata is collected for every build, so changes to
+the current checkout are reflected without requiring a clean build.
 
 ## Base version
 

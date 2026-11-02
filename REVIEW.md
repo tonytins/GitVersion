@@ -21,6 +21,8 @@ Use this checklist when reviewing a change to GitVersion.
   without producing invalid or misleading version strings?
 - Does the plugin declare the correct generated output and rebuild when
   repository metadata changes?
+- Are major, minor, and patch consistent with the generated semantic version,
+  and are both abbreviated and full commit identifiers correct?
 - Is generated Swift valid and safely escaped for unusual branch, tag, or remote
   values?
 - Are Git command failures and invalid `GitVersion.txt` contents surfaced
