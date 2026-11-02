@@ -42,18 +42,30 @@ the current checkout are reflected without requiring a clean build.
 ## Base version
 
 Place a `GitVersion.txt` file in the repository root to set the base version.
-Use a semantic version such as `1.2.3` or `1.2.3-preview.1`. If the file is
-absent, GitVersion uses the nearest reachable semantic version tag, then falls
-back to `0.1.0`.
+Use a semantic version such as `1.2.3` or `1.2.3-preview.1`. GitVersion finds
+the latest first-parent commit that changed this file and adds the number of
+first-parent commits since that baseline to the patch component. Merge commits
+on the first-parent history count; commits reachable only from a merge's other
+parent do not.
 
-The generated semantic version adds a prerelease label from the branch and
-number of commits after the nearest semantic version tag when applicable. It
-also adds the normalized branch and commit as build metadata, and appends
-`.dirty` when the working tree has changes.
+If `GitVersion.txt` is absent, GitVersion uses the nearest semantic version tag
+on the first-parent history as the base. If there is no such tag, it starts from
+`0.1.0` at the first commit in the first-parent history. An explicit prerelease
+label in the base version is preserved. The generated version also adds the
+normalized branch and commit as build metadata, and appends `.dirty` when the
+working tree has changes.
 
 GitVersion reads `origin` for the repository URL and recognizes common GitHub,
 GitLab, and Azure Pipelines branch environment variables for detached CI builds.
 Git must be installed and the consuming package must be inside a Git repository.
+
+## Demo
+
+Run the included program from the repository root to print its generated version:
+
+```sh
+swift run GitVersionDemo
+```
 
 ## License
 

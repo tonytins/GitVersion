@@ -41,3 +41,9 @@ import Testing
     #expect(info.commit == "a1b2c3d4e5f6")
     #expect(info.fullCommit == "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
 }
+
+@Test func generatedPatchIncludesFirstParentCommitCount() {
+    let version = GitVersion.current
+
+    #expect(version.patch == version.baseVersion.patch + version.commits)
+}

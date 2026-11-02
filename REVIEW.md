@@ -17,6 +17,9 @@ Use this checklist when reviewing a change to GitVersion.
 - Does generated metadata match the current repository state for a clean
   checkout, a dirty working tree, a tagged commit, an untagged commit, and a
   detached checkout?
+- Does the patch advance from the last `GitVersion.txt` change using first-parent
+  history, counting merge commits but excluding commits reachable only through
+  other merge parents?
 - Are branch names, tags, and semantic-version components parsed and normalized
   without producing invalid or misleading version strings?
 - Does the plugin declare the correct generated output and rebuild when

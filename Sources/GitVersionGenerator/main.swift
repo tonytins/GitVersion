@@ -36,6 +36,7 @@ private enum GeneratorError: Error, CustomStringConvertible {
     case notRepository
     case gitCommandFailed(String)
     case invalidVersionFile(URL)
+    case versionOverflow
     case fileSystem(String)
 
     var description: String {
@@ -50,6 +51,8 @@ private enum GeneratorError: Error, CustomStringConvertible {
             return "GitVersionGenerator could not read required repository metadata: \(command)"
         case .invalidVersionFile(let url):
             return "\(url.lastPathComponent) must contain a semantic version such as 1.2.3 or 1.2.3-preview.1."
+        case .versionOverflow:
+            return "The patch version overflowed while adding commits since the version baseline."
         case .fileSystem(let message):
             return "GitVersionGenerator could not write generated source: \(message)"
         }
@@ -197,7 +200,10 @@ private func collectInfo(repository: URL, git: GitCommand) throws -> RepositoryI
     let commitDate = try git.runRequired(["show", "-s", "--format=%cI", "HEAD"], in: root)
     let exactTag = try git.run(["describe", "--tags", "--exact-match", "HEAD"], in: root)
     let baseTag = try git.run(
-        ["describe", "--tags", "--match", "[0-9]*", "--match", "v[0-9]*", "--abbrev=0", "HEAD"],
+        [
+            "describe", "--first-parent", "--tags", "--match", "[0-9]*",
+            "--match", "v[0-9]*", "--abbrev=0", "HEAD"
+        ],
         in: root
     )
     let repositoryURL = try git.run(["config", "--get", "remote.origin.url"], in: root)
@@ -234,20 +240,32 @@ private func collectInfo(repository: URL, git: GitCommand) throws -> RepositoryI
     }
 
     let baseVersion: SemanticVersion
+    let baselineCommit: String
     if let versionFileValue {
         guard let parsed = parseSemanticVersion(versionFileValue) else {
             throw GeneratorError.invalidVersionFile(configURL)
         }
         baseVersion = parsed
+        baselineCommit = try git.run(
+            ["log", "-1", "--first-parent", "--format=%H", "HEAD", "--", "GitVersion.txt"],
+            in: root
+        )
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? fullCommit
     } else if let baseTag, let parsed = parseSemanticVersion(baseTag) {
         baseVersion = parsed
+        baselineCommit = try git.runRequired(["rev-parse", "--verify", "\(baseTag)^{commit}"], in: root)
     } else {
         baseVersion = SemanticVersion(major: 0, minor: 1, patch: 0, label: nil)
+        baselineCommit = try git.runRequired(
+            ["rev-list", "--first-parent", "--max-parents=0", "HEAD"],
+            in: root
+        )
     }
 
-    let countRange = baseTag.map { "\($0)..HEAD" } ?? "HEAD"
+    let countRange = "\(baselineCommit)..HEAD"
     let commitCountText = try git.run(
-        ["rev-list", "--count", countRange],
+        ["rev-list", "--first-parent", "--count", countRange],
         in: root
     )
     guard let commitCountText else {
@@ -259,19 +277,16 @@ private func collectInfo(repository: URL, git: GitCommand) throws -> RepositoryI
 
     let status = try git.runRequired(["status", "--porcelain"], in: root)
     let isDirty = !status.isEmpty
-    let label: String?
-    if commitCount > 0 {
-        let branchLabel = "\(normalizedIdentifier(branch)).\(commitCount)"
-        label = [baseVersion.label, branchLabel].compactMap { $0 }.joined(separator: ".")
-    } else {
-        label = baseVersion.label
+    let (patch, patchOverflow) = baseVersion.patch.addingReportingOverflow(commitCount)
+    guard !patchOverflow else {
+        throw GeneratorError.versionOverflow
     }
     let metadata = "\(normalizedIdentifier(branch)).\(commit)"
     let semanticVersion = SemanticVersion(
         major: baseVersion.major,
         minor: baseVersion.minor,
-        patch: baseVersion.patch,
-        label: label,
+        patch: patch,
+        label: baseVersion.label,
         buildMetadata: metadata + (isDirty ? ".dirty" : "")
     )
 

@@ -60,13 +60,13 @@ public struct GitVersionInfo: Sendable, Equatable {
     /// The committer date of the current commit in ISO 8601 format.
     public let commitDate: String
 
-    /// The number of commits since the nearest semantic version tag.
+    /// The number of first-parent commits since the version baseline.
     public let commits: Int
 
     /// The tag pointing directly at the current commit, if any.
     public let tag: String?
 
-    /// The nearest reachable semantic version tag, if any.
+    /// The nearest semantic version tag on the first-parent history, if any.
     public let baseTag: String?
 
     /// Whether the repository has tracked or untracked changes.
