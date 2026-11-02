@@ -50,3 +50,13 @@ also adds the normalized branch and commit as build metadata, and appends
 GitVersion reads `origin` for the repository URL and recognizes common GitHub,
 GitLab, and Azure Pipelines branch environment variables for detached CI builds.
 Git must be installed and the consuming package must be inside a Git repository.
+
+## License
+
+I license the source code under the BSD-3-Clause license - see [LICENSE](LICENSE) for details.
+
+## Acknowledgements
+
+GitVersion is inspired by [GitInfo](https://github.com/devlooped/GitInfo), whose
+approach to making Git metadata available to code during builds provided the
+starting point for this SwiftPM implementation.
