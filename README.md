@@ -11,7 +11,7 @@ target that should receive generated metadata:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tonytins/GitVersion.git", from: "0.1.0")
+    .package(url: "https://github.com/tonytins/GitVersion.git", from: "0.2.0")
 ],
 targets: [
     .executableTarget(
