@@ -42,8 +42,13 @@ import Testing
     #expect(info.fullCommit == "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
 }
 
-@Test func generatedPatchIncludesFirstParentCommitCount() {
+@Test func generatedAccessorsMatchCurrentVersion() {
     let version = GitVersion.current
 
-    #expect(version.patch == version.baseVersion.patch + version.commits)
+    #expect(GitVersion.major == version.semanticVersion.major)
+    #expect(GitVersion.minor == version.semanticVersion.minor)
+    #expect(GitVersion.patch == version.semanticVersion.patch)
+    #expect(GitVersion.commit == version.commit)
+    #expect(GitVersion.fullCommit == version.fullCommit)
+    #expect(GitVersion.version == version.semanticVersion.description)
 }

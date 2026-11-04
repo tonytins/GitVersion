@@ -17,19 +17,24 @@ Use this checklist when reviewing a change to GitVersion.
 - Does generated metadata match the current repository state for a clean
   checkout, a dirty working tree, a tagged commit, an untagged commit, and a
   detached checkout?
-- Does the patch advance from the last `GitVersion.txt` change using first-parent
-  history, counting merge commits but excluding commits reachable only through
-  other merge parents?
+- Does the patch advance from the closest reset, either a semantic version tag
+  or a `GitVersion.txt` change, using first-parent history, counting merge
+  commits but excluding commits reachable only through other merge parents?
 - Are branch names, tags, and semantic-version components parsed and normalized
   without producing invalid or misleading version strings?
 - Does the plugin declare the correct generated output and rebuild when
-  repository metadata changes?
+  repository metadata changes, including in worktrees, submodules, and packages
+  below the repository root?
 - Are major, minor, and patch consistent with the generated semantic version,
   and are both abbreviated and full commit identifiers correct?
 - Is generated Swift valid and safely escaped for unusual branch, tag, or remote
   values?
-- Are Git command failures and invalid `GitVersion.txt` contents surfaced
-  clearly instead of yielding success-shaped fallback metadata?
+- Are Git command failures, shallow clones, and invalid `GitVersion.txt` contents
+  surfaced clearly instead of yielding success-shaped fallback metadata? Is a
+  build with no repository the only fallback, and is it marked `+unknown` with a
+  warning?
+- Is the generated API still internal, and are credentials and local paths kept
+  out of the repository URL?
 - Are public API names, documentation, and defaults clear and consistent with
   the package's intended behavior?
 - Do focused tests cover the changed behavior, and is an actual consumer build

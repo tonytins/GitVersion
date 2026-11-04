@@ -16,7 +16,8 @@ let package = Package(
             dependencies: ["GitVersion"],
             plugins: ["GitVersionPlugin"]
         ),
-        .executableTarget(name: "GitVersionGenerator"),
+        .target(name: "GitVersionGeneratorCore"),
+        .executableTarget(name: "GitVersionGenerator", dependencies: ["GitVersionGeneratorCore"]),
         .plugin(
             name: "GitVersionPlugin",
             capability: .buildTool(),
@@ -24,7 +25,7 @@ let package = Package(
         ),
         .testTarget(
             name: "GitVersionTests",
-            dependencies: ["GitVersion"],
+            dependencies: ["GitVersion", "GitVersionGeneratorCore"],
             plugins: ["GitVersionPlugin"]
         )
     ]

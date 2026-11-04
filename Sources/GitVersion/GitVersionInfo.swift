@@ -44,35 +44,47 @@ public struct GitSemanticVersion: Sendable, Equatable, CustomStringConvertible {
 }
 
 /// Git metadata captured when a Swift package is built.
+///
+/// Repository fields are `nil`, ``commits`` is `0`, and ``isDirty`` is `false`
+/// when the build had no repository to read or `GITVERSION_VERSION` was set.
 public struct GitVersionInfo: Sendable, Equatable {
-    /// The URL of the repository's `origin` remote.
+    /// The URL of the repository's `origin` remote without credentials.
+    ///
+    /// This is `nil` when there is no remote or the remote is on the local machine.
     public let repositoryURL: String?
 
-    /// The current branch, or the abbreviated commit when detached.
-    public let branch: String
+    /// The current branch, or the branch named by a CI service for a detached checkout.
+    ///
+    /// This is `nil` for any other detached checkout.
+    public let branch: String?
 
     /// The abbreviated identifier of the current commit.
-    public let commit: String
+    public let commit: String?
 
     /// The full identifier of the current commit.
-    public let fullCommit: String
+    public let fullCommit: String?
 
     /// The committer date of the current commit in ISO 8601 format.
-    public let commitDate: String
+    public let commitDate: String?
 
     /// The number of first-parent commits since the version baseline.
+    ///
+    /// When `GitVersion.txt` is below the repository root, only commits that
+    /// changed its directory are counted.
     public let commits: Int
 
     /// The tag pointing directly at the current commit, if any.
     public let tag: String?
 
     /// The nearest semantic version tag on the first-parent history, if any.
+    ///
+    /// This tag is not the version baseline when `GitVersion.txt` changed more recently.
     public let baseTag: String?
 
     /// Whether the repository has tracked or untracked changes.
     public let isDirty: Bool
 
-    /// The configured version before branch and commit information is added.
+    /// The version at the baseline, before commits and build metadata are added.
     public let baseVersion: GitSemanticVersion
 
     /// The calculated semantic version for this build.
@@ -93,10 +105,10 @@ public struct GitVersionInfo: Sendable, Equatable {
     /// Creates a snapshot of Git metadata.
     public init(
         repositoryURL: String?,
-        branch: String,
-        commit: String,
-        fullCommit: String? = nil,
-        commitDate: String,
+        branch: String?,
+        commit: String?,
+        fullCommit: String?,
+        commitDate: String?,
         commits: Int,
         tag: String?,
         baseTag: String?,
@@ -107,7 +119,7 @@ public struct GitVersionInfo: Sendable, Equatable {
         self.repositoryURL = repositoryURL
         self.branch = branch
         self.commit = commit
-        self.fullCommit = fullCommit ?? commit
+        self.fullCommit = fullCommit
         self.commitDate = commitDate
         self.commits = commits
         self.tag = tag

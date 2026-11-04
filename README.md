@@ -25,39 +25,106 @@ targets: [
 The generated API is available in that target:
 
 ```swift
-print(GitVersion.current.branch)
-print(GitVersion.current.commit)
-print(GitVersion.current.fullCommit)
+print(GitVersion.version)
 print(GitVersion.major, GitVersion.minor, GitVersion.patch)
-print(GitVersion.current.version)
+print(GitVersion.commit ?? "no commit")
+print(GitVersion.fullCommit ?? "no commit")
+print(GitVersion.current.branch ?? "detached")
 ```
 
 `GitVersion.current` exposes the repository URL, branch, abbreviated and full
 commit identifiers, commit date, commit count, exact and base tags, dirty state,
 base version, and calculated semantic version. The generated `GitVersion`
-namespace also provides direct `major`, `minor`, `patch`, `commit`, and
-`fullCommit` accessors. Metadata is collected for every build, so changes to
-the current checkout are reflected without requiring a clean build.
+namespace also provides direct `major`, `minor`, `patch`, `commit`,
+`fullCommit`, and `version` accessors.
+
+The generated `GitVersion` type is internal to each target. A library that wants
+to publish its version needs to declare its own public API for it.
 
 ## Base version
 
-Place a `GitVersion.txt` file in the repository root to set the base version.
-Use a semantic version such as `1.2.3` or `1.2.3-preview.1`. GitVersion finds
-the latest first-parent commit that changed this file and adds the number of
-first-parent commits since that baseline to the patch component. Merge commits
-on the first-parent history count; commits reachable only from a merge's other
-parent do not.
+The version comes from the closest reset on the first-parent history, plus the
+number of first-parent commits since that reset. A reset is either of these:
 
-If `GitVersion.txt` is absent, GitVersion uses the nearest semantic version tag
-on the first-parent history as the base. If there is no such tag, it starts from
-`0.1.0` at the first commit in the first-parent history. An explicit prerelease
-label in the base version is preserved. The generated version also adds the
-normalized branch and commit as build metadata, and appends `.dirty` when the
-working tree has changes.
+- A semantic version tag such as `v1.2.3` or `1.2.3`. Other tags are ignored.
+- A commit that changed `GitVersion.txt`, which holds a semantic version such as
+  `1.2.3` or `1.2.3-preview.1`.
 
-GitVersion reads `origin` for the repository URL and recognizes common GitHub,
-GitLab, and Azure Pipelines branch environment variables for detached CI builds.
-Git must be installed and the consuming package must be inside a Git repository.
+A tag wins when both land on the same commit. With no reset at all, the version
+starts from `0.1.0` at the first commit.
+
+| History                                | Version |
+| -------------------------------------- | ------- |
+| File set to `0.1.0`, 2 commits later   | `0.1.2` |
+| Then `v5.0.0` tagged on that commit    | `5.0.0` |
+| 1 commit after the tag                 | `5.0.1` |
+| File then changed to `6.0.0`           | `6.0.0` |
+
+Merge commits on the first-parent history count; commits reachable only from a
+merge's other parent do not. A prerelease label in the base version is
+preserved.
+
+GitVersion searches for `GitVersion.txt` from the package directory up to the
+repository root and uses the first one it finds. When that file is below the
+root, only commits that changed its directory are counted, so a package in a
+monorepo is not affected by its neighbors. Tags apply to the whole repository,
+so a version tag still resets a package with its own file.
+
+## Build metadata
+
+The generated version adds the normalized branch and abbreviated commit as build
+metadata, such as `1.2.3+feature.login.a1b2c3d4e5f6`, and appends `.dirty` when
+the working tree has changes. Keep `.build` ignored, and commit or ignore
+`Package.resolved`, or every build reports as dirty.
+
+GitVersion reads `origin` for the repository URL, removes any credentials, and
+reports `nil` for a remote on the local machine. SwiftPM clones dependencies from
+a local cache, so a dependency's URL is `nil`.
+
+A detached checkout has a `nil` branch unless a CI service names one for that
+exact commit. GitVersion recognizes GitHub Actions, GitLab CI, Azure Pipelines,
+and Jenkins. Tag builds have no branch.
+
+## When metadata updates
+
+SwiftPM only runs the generator when one of its inputs changes. GitVersion
+watches Git's record of the checkout and `GitVersion.txt`, so commits, branch
+switches, new tags, and staged changes all update the metadata on the next build.
+
+Git does not record working tree edits until they are staged, so **`isDirty` and
+the `.dirty` suffix can lag** after an unstaged edit or a new untracked file. The
+next commit or staged change corrects them. Run a clean build, or check
+`git status` in your release process, if a release must prove it is clean.
+
+## Builds without full history
+
+**Shallow clones fail the build**, because the commit count would be wrong. On
+GitHub Actions, set `fetch-depth: 0` on `actions/checkout`.
+
+**Source archives and other builds with no repository** succeed with a warning.
+The version is the package's `GitVersion.txt`, or `0.0.0` without one, marked
+`+unknown` because there is no commit count to add:
+
+```text
+1.2.0+unknown
+```
+
+Repository fields are `nil`, `commits` is `0`, and `isDirty` is `false`. A
+repository that exists but cannot be read still fails the build.
+
+**To set the version directly**, for example in a distro package or a Docker
+build, use `GITVERSION_VERSION`:
+
+```sh
+GITVERSION_VERSION=1.2.7 swift build
+```
+
+It replaces everything: Git is not run, and repository fields report as they do
+with no repository. Build metadata such as `1.2.7+fedora.1` is kept. An invalid
+value fails the build. Changing it requires a clean build.
+
+An archive unpacked inside another Git repository, such as a packaging repository,
+reads that repository's metadata. Set `GITVERSION_VERSION` in that case.
 
 ## Demo
 
