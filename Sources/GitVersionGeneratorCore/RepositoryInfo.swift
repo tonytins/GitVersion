@@ -2,6 +2,9 @@ import Foundation
 
 let versionFileName = "GitVersion.txt"
 let versionOverrideVariable = "GITVERSION_VERSION"
+let abbreviationVariable = "GITVERSION_ABBREV"
+let defaultAbbreviation = 12
+let abbreviationRange = 4...40
 
 public struct RepositoryInfo {
     let repositoryURL: String?
@@ -26,6 +29,7 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case invalidVersionFile(URL)
     case unreadableVersionFile(URL, reason: String)
     case invalidVersionOverride(String)
+    case invalidAbbreviation(String)
     case versionOverflow
     case fileSystem(String)
 
@@ -49,6 +53,11 @@ public enum GeneratorError: Error, CustomStringConvertible {
             return "GitVersionGenerator could not read \(url.path): \(reason)"
         case .invalidVersionOverride(let value):
             return "\(versionOverrideVariable) must be a semantic version such as 1.2.3, but was '\(value)'."
+        case .invalidAbbreviation(let value):
+            return """
+            \(abbreviationVariable) must be a whole number from \
+            \(abbreviationRange.lowerBound) to \(abbreviationRange.upperBound), but was '\(value)'.
+            """
         case .versionOverflow:
             return "The patch version overflowed while adding commits since the version baseline."
         case .fileSystem(let message):
@@ -307,6 +316,19 @@ private func isTruthy(_ value: String?) -> Bool {
     )
 }
 
+/// The commit abbreviation length, which defaults to 12.
+private func commitAbbreviation(in environment: [String: String]) throws -> Int {
+    guard let value = environment[abbreviationVariable] else { return defaultAbbreviation }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty,
+          trimmed.allSatisfy({ $0.isASCII && $0.isNumber }),
+          let length = Int(trimmed),
+          abbreviationRange.contains(length) else {
+        throw GeneratorError.invalidAbbreviation(value)
+    }
+    return length
+}
+
 /// The path that version counting is limited to, relative to the repository root.
 ///
 /// A version file scopes the count to its directory. Without one, a package
@@ -329,7 +351,8 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
         throw GeneratorError.shallowRepository
     }
 
-    let commit = try git.output(["rev-parse", "--verify", "--short=12", "HEAD"], in: root)
+    let abbreviation = try commitAbbreviation(in: environment)
+    let commit = try git.output(["rev-parse", "--verify", "--short=\(abbreviation)", "HEAD"], in: root)
     let fullCommit = try git.output(["rev-parse", "--verify", "HEAD"], in: root)
     let commitDate = try git.output(["show", "-s", "--no-show-signature", "--format=%cI", "HEAD"], in: root)
     let remote = try git.optionalOutput(["config", "--get", "remote.origin.url"], in: root)
@@ -452,7 +475,7 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
 
     let status = try git.output(["status", "--porcelain", "--untracked-files=normal"], in: root)
     let isDirty = !status.isEmpty
-    let metadata = [branch.flatMap(normalizedIdentifier), commit, isDirty ? "dirty" : nil]
+    let metadata = [branch.flatMap(normalizedIdentifier), commit]
         .compactMap { $0 }
         .joined(separator: ".")
 

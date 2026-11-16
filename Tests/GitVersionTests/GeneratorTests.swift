@@ -570,12 +570,36 @@ func branchNameEncodesBaseVersion(_ branch: String, _ expected: String) throws {
 
 // MARK: - Repository state
 
-@Test func reportsDirtyStateInBuildMetadata() throws {
+@Test func dirtyStateDoesNotChangeTheVersion() throws {
     let repository = try TemporaryRepository()
     try repository.commit()
-    #expect(try repository.info().semanticVersion.buildMetadata?.hasSuffix(".dirty") == false)
+    let clean = try repository.info()
     try repository.write("untracked.txt", contents: "x\n")
-    #expect(try repository.info().semanticVersion.buildMetadata?.hasSuffix(".dirty") == true)
+    let dirty = try repository.info()
+    #expect(!clean.isDirty)
+    #expect(dirty.isDirty)
+    #expect(clean.semanticVersion == dirty.semanticVersion)
+    #expect(dirty.semanticVersion.buildMetadata?.contains("dirty") == false)
+}
+
+@Test func abbreviationSetsTheShortCommitLength() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    #expect(try repository.info().commit?.count == defaultAbbreviation)
+    for (value, expected) in [("8", 8), (" 40\n", 40), ("4", 4)] {
+        let info = try repository.info(environment: [abbreviationVariable: value])
+        #expect(info.commit?.count == expected)
+        #expect(info.fullCommit?.hasPrefix(try #require(info.commit)) == true)
+    }
+}
+
+@Test(arguments: ["", " ", "3", "41", "0", "abc", "12.5", "-12", "+12", "1e2"])
+func invalidAbbreviationFails(_ value: String) throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    #expect(throws: GeneratorError.self) {
+        try repository.info(environment: [abbreviationVariable: value])
+    }
 }
 
 @Test func untrackedFilesAreDirtyWhateverTheStatusConfiguration() throws {
@@ -622,7 +646,7 @@ func branchNameEncodesBaseVersion(_ branch: String, _ expected: String) throws {
     let repository = try TemporaryRepository()
     try repository.commit()
     let info = try repository.info(environment: ["GIT_TRACE": "1"])
-    #expect(info.commit?.count == 12)
+    #expect(info.commit?.count == defaultAbbreviation)
     #expect(!info.isDirty)
 }
 
