@@ -309,6 +309,26 @@ func skipsUnparseableTags(_ tag: String) throws {
     #expect(coreVersion(try repository.info()) == "2.0.1-preview")
 }
 
+@Test func pathPrefixedTagUsesItsLastSegment() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "release/v1.2.3")
+    try repository.commit()
+    let info = try repository.info()
+    #expect(coreVersion(info) == "1.2.4")
+    #expect(info.baseTag == "release/v1.2.3")
+}
+
+@Test func pathPrefixedTagOnHeadIsReported() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "release/2.0.0")
+    let info = try repository.info()
+    #expect(coreVersion(info) == "2.0.0")
+    #expect(info.tag == "release/2.0.0")
+    #expect(info.baseTag == "release/2.0.0")
+}
+
 @Test func tagWithBuildMetadataIsAReset() throws {
     let repository = try TemporaryRepository()
     try repository.commit()

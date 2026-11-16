@@ -249,6 +249,14 @@ private struct VersionTag {
     let version: SemanticVersion?
 }
 
+/// Parses a tag name, allowing a path prefix such as `release/1.2.3`.
+///
+/// The last path segment is the version, matching how a version branch is read.
+private func tagVersion(_ name: String) -> SemanticVersion? {
+    let candidate = name.lastIndex(of: "/").map { name[name.index(after: $0)...] } ?? name[...]
+    return SemanticVersion(parsing: String(candidate), allowsBuildMetadata: true)
+}
+
 private func readTags(git: GitCommand, root: URL) throws -> [VersionTag] {
     let listing = try git.output(
         [
@@ -264,7 +272,7 @@ private func readTags(git: GitCommand, root: URL) throws -> [VersionTag] {
         return VersionTag(
             name: name,
             commit: String(fields[1].isEmpty ? fields[0] : fields[1]),
-            version: SemanticVersion(parsing: name, allowsBuildMetadata: true)
+            version: tagVersion(name)
         )
     }
 }
