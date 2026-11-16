@@ -519,7 +519,53 @@ func branchNameEncodesBaseVersion(_ branch: String, _ expected: String) throws {
     let repository = try TemporaryRepository()
     try repository.commitFile("app/GitVersion.txt", contents: "2.0.0\n")
     try repository.commitFile("other/file.txt")
-    #expect(coreVersion(try repository.info(package: "other")) == "0.1.1")
+    let info = try repository.info(package: "other")
+    #expect(coreVersion(info) == "0.1.0")
+    #expect(info.commits == 0)
+}
+
+@Test func defaultVersionStartsAtTheFirstCommitTouchingThePackage() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("README.md")
+    try repository.commitFile("packages/app/file.txt")
+    try repository.commitFile("packages/app/Sources/file.txt")
+    try repository.commitFile("elsewhere/file.txt")
+    let info = try repository.info(package: "packages/app")
+    #expect(coreVersion(info) == "0.1.1")
+    #expect(info.commits == 1)
+}
+
+@Test func packageWithoutHistoryStartsAtZero() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("README.md")
+    try repository.write("empty/.keep", contents: "x\n")
+    let info = try repository.info(package: "empty")
+    #expect(coreVersion(info) == "0.1.0")
+    #expect(info.commits == 0)
+}
+
+@Test func tagResetCountsOnlyCommitsInThePackage() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("README.md")
+    try repository.run("tag", "v2.0.0")
+    try repository.commitFile("packages/app/file.txt")
+    try repository.commitFile("elsewhere/file.txt")
+    let info = try repository.info(package: "packages/app")
+    #expect(coreVersion(info) == "2.0.1")
+    #expect(info.commits == 1)
+    #expect(info.baseTag == "v2.0.0")
+}
+
+@Test func branchVersionCountsOnlyCommitsInThePackage() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("README.md")
+    try repository.run("checkout", "-q", "-b", "release/1.5.0")
+    try repository.commitFile("packages/app/file.txt")
+    try repository.commitFile("elsewhere/file.txt")
+    let info = try repository.info(package: "packages/app")
+    #expect(coreVersion(info) == "1.5.1")
+    #expect(info.commits == 1)
+    #expect(info.warning == nil)
 }
 
 // MARK: - Repository state

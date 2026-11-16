@@ -307,6 +307,18 @@ private func isTruthy(_ value: String?) -> Bool {
     )
 }
 
+/// The path that version counting is limited to, relative to the repository root.
+///
+/// A version file scopes the count to its directory. Without one, a package
+/// below the root scopes the count to the package, and a package at the root
+/// scopes it to the whole repository. An empty result means the whole repository.
+private func projectScope(versionFile: VersionFile?, packagePrefix: String) -> String {
+    if let versionFile {
+        return versionFile.directory
+    }
+    return packagePrefix.hasSuffix("/") ? String(packagePrefix.dropLast()) : packagePrefix
+}
+
 private func repositoryInfo(package: URL, environment: [String: String]) throws -> RepositoryInfo {
     let git = try GitCommand(environment: environment)
     let rootPath = try git.output(["rev-parse", "--show-toplevel"], in: package)
@@ -348,6 +360,7 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
     }
 
     let versionFile = try findVersionFile(root: root, packagePrefix: packagePrefix)
+    let scope = projectScope(versionFile: versionFile, packagePrefix: packagePrefix)
 
     var warning: String?
     var baseTag: String?
@@ -393,15 +406,25 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
     let baseReset: Reset
     if let reset {
         baseReset = reset
-    } else if let initialCommit = history.last {
+    } else if scope.isEmpty, let initialCommit = history.last {
         baseReset = Reset(
             start: initialCommit,
             version: SemanticVersion(major: 0, minor: 1, patch: 0)
         )
-    } else {
+    } else if scope.isEmpty {
         throw GeneratorError.gitCommandFailed(
             command: "rev-list --first-parent HEAD",
             reason: "Git returned no commits."
+        )
+    } else {
+        // The oldest commit that touched the package is where its history starts.
+        let firstTouching = try git.output(
+            ["rev-list", "--first-parent", "HEAD", "--", scope],
+            in: root
+        ).split(separator: "\n").last.map(String.init)
+        baseReset = Reset(
+            start: firstTouching ?? fullCommit,
+            version: SemanticVersion(major: 0, minor: 1, patch: 0)
         )
     }
 
@@ -413,8 +436,8 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
     )
 
     var countArguments = ["rev-list", "--first-parent", "--count", "\(baseReset.start)..HEAD"]
-    if let directory = versionFile?.directory, !directory.isEmpty {
-        countArguments += ["--", directory]
+    if !scope.isEmpty {
+        countArguments += ["--", scope]
     }
     guard let commitCount = Int(try git.output(countArguments, in: root)) else {
         throw GeneratorError.gitCommandFailed(
