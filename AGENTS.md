@@ -16,14 +16,18 @@ snapshot of the repository when SwiftPM builds a target, and is inspired by
 | `Sources/GitVersionGeneratorCore/GitCommand.swift`      | Git process runner with a pinned environment.                     |
 | `Sources/GitVersionGeneratorCore/SemanticVersion.swift` | Semantic-version parsing and precedence.                          |
 | `Plugins/GitVersionPlugin/plugin.swift`                 | Build-tool plugin: declares inputs, output, and the command.      |
-| `Sources/GitVersionDemo/main.swift`                     | Example executable that attaches the plugin.                      |
+| `Demo/Package.swift`                                   | Standalone demo package that consumes GitVersion.                 |
+| `Demo/Sources/GitVersionDemo/main.swift`               | Example executable that attaches the plugin.                      |
 | `Tests/GitVersionTests/`                                | Library and generator tests over real temporary repositories.     |
-| `GitVersion.txt`                                        | Base version used as a reset when it changes.                     |
+| `GitVersion.txt`                                        | Base version used when no branch or tag supplies one.             |
+| `changelog.md`                                          | User-facing release notes, one section per release.               |
 | `README.md`                                             | User-facing setup, behavior, and version calculation docs.        |
 
 ## Build and Test
 
 - Build with `swift build`.
+- Build the demo with `swift build --package-path Demo` and run with
+  `swift run --package-path Demo GitVersionDemo`.
 - Run the test suite with `swift test`.
 - When changing the plugin or generator, verify it with a consuming package in a
   Git repository as well as running the package tests.
@@ -63,23 +67,51 @@ convenience.
 
 ### Version Calculation
 
-- **Base the version on the closest reset on the first-parent history**: a
-  semantic version tag or a commit that changed `GitVersion.txt`, with the tag
-  winning on the same commit. Increment the patch by first-parent commits since
-  that reset.
+- **Resolve the base version with a strict cascade**: a branch-encoded version,
+  then the nearest semantic version tag on first-parent history, then a commit
+  that changed `GitVersion.txt`, then `0.1.0`. A tag always beats the file; do
+  not compare their commit recency.
+- **Read a version branch from the last path segment** and count from its fork
+  point with the default branch (`origin/HEAD`, then `main`, `origin/main`,
+  `master`, `origin/master`). If the fork point cannot be found, warn and fall
+  through to the tag or file. `GITVERSION_IGNORE_BRANCH_VERSION` disables branch
+  versions.
+- **Read a tag's last path segment** as its version, so `v1.2.3`, `1.2.3`, and
+  `release/v1.2.3` all reset. Skip tags whose segment is not a version.
+- **Never let `GitVersion.txt` override an existing tag.** The file is a baseline
+  for repositories without tags, not a release switch; tag only real releases.
+- **Scope counting to one path**: the version file's directory when one is found,
+  otherwise the package directory when below the root, otherwise the whole
+  repository. Apply the same scope to every source.
+- **With no source, start from `0.1.0` at the oldest first-parent commit that
+  touched the scope**, and report `0.1.0` with zero commits for a scope with no
+  history. Preserve a prerelease label from the base version.
 - **Count first-parent merge commits**, not commits reachable only through other
   merge parents.
-- **When `GitVersion.txt` is below the repository root, count only commits that
-  changed its directory**, so a package in a monorepo is not affected by its
-  neighbors. Tags still apply to the whole repository.
-- **With no reset at all, start from `0.1.0` at the first commit**, and preserve
-  a prerelease label from the base version.
-- **Parse and normalize branch names and tags** so the generated version is
-  always valid semantic versioning, never invalid or misleading.
+- **Parse versions permissively**: optional `v`/`V`, `M.m` (patch 0), trailing or
+  leading labels, and build metadata only on tags and `GITVERSION_VERSION`.
+  Reject anything else; never emit an invalid version.
+- **Build the version as** `M.m.(basePatch + commits)[-label]+branch.commit`, with
+  no dirty marker. `isDirty` includes tracked and untracked changes but is not
+  part of the version.
+- **Read `GITVERSION_ABBREV` from the environment**: default 12, accept 4–40,
+  and fail the build for anything else. Keep the full identifier at 40.
+- **Set `baseTag` only when a tag supplies the reset**, and report the exact tag
+  at `HEAD` separately.
 - **Expose semantic-version components and both abbreviated and full commit
   identifiers** in generated metadata.
 - **Preserve behavior** for tagged and untagged commits, detached checkouts, CI
   branch names, and dirty working trees.
+
+### Releases and Changelog
+
+- **A tag is a release boundary, not a version switch.** Do not create a tag to
+  make a changelog heading or a file change take effect.
+- **Document each release from the previous tag**: use `git log <previous-tag>..HEAD`
+  and describe user-facing changes. The heading names the release; the tag is
+  created when that release ships.
+- **Keep `changelog.md` current when behavior changes**, including breaking
+  changes and migration notes.
 
 ### Build Plugin and Generated Source
 
@@ -93,6 +125,11 @@ convenience.
 - **Keep generated source deterministic and valid Swift.** Escape repository
   values as Swift literals rather than interpolating them as code, and do not
   rewrite the output when it has not changed.
+- **The demo is a separate package under `Demo/`**; keep it building and running
+  via `swift build --package-path Demo` and `swift run --package-path Demo GitVersionDemo`.
+- **Environment overrides are read at generation time**; `GITVERSION_VERSION`,
+  `GITVERSION_ABBREV`, and `GITVERSION_IGNORE_BRANCH_VERSION` are not plugin
+  inputs, so changing them requires a clean build.
 - **Follow the package's Swift tools version and existing naming and formatting**,
   and keep public APIs clear at the call site with documentation where names
   alone are not sufficient.

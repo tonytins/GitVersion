@@ -21,11 +21,31 @@ this Swift package and build-tool plugin. The rules it checks against are in
 - Does generated metadata match the current repository state for a clean
   checkout, a dirty working tree, a tagged commit, an untagged commit, and a
   detached checkout?
-- Does the patch advance from the closest reset, either a semantic version tag
-  or a `GitVersion.txt` change, using first-parent history, counting merge
-  commits but excluding commits reachable only through other merge parents?
-- Are branch names, tags, and semantic-version components parsed and normalized
-  without producing invalid or misleading version strings?
+- Does the base version follow the strict cascade: branch-encoded version, then
+  nearest semantic version tag on first-parent history, then `GitVersion.txt`,
+  then the default `0.1.0`? Does a tag always beat `GitVersion.txt`, even when the
+  file changed later?
+- Are branch-encoded versions counted from their fork point with the default
+  branch (`origin/HEAD`, `main`, `origin/main`, `master`, `origin/master`), and
+  does GitVersion warn and fall through when the fork point or default branch is
+  missing? Does `GITVERSION_IGNORE_BRANCH_VERSION` disable branch versions?
+- Does tag version discovery evaluate the last path segment, accepting names
+  such as `release/v1.2.3` and ignoring non-version tags?
+- Is counting scoped to the version file's directory when found, the package
+  directory when below the root, or the whole repository, across all reset
+  sources?
+- Does a repository without a reset start at `0.1.0` from the oldest first-parent
+  commit that touched the scope, or report `0.1.0` with zero commits if no commits
+  touched the scope?
+- Does the patch advance using first-parent history, counting merge commits but
+  excluding commits reachable only through other merge parents?
+- Are base versions parsed permissively (optional `v`/`V`, two-part versions with
+  patch 0, trailing labels, and leading labels) while rejecting invalid syntax,
+  and is build metadata restricted to tags and `GITVERSION_VERSION`?
+- Is the version string free of `.dirty` suffixes while `isDirty` continues to
+  reflect working tree state?
+- Does `GITVERSION_ABBREV` set the commit length between 4 and 40, failing on
+  invalid values while keeping the full commit at 40 characters?
 - Does the plugin declare the correct generated output and rebuild when
   repository metadata changes, including in worktrees, submodules, and packages
   below the repository root?
@@ -44,8 +64,10 @@ this Swift package and build-tool plugin. The rules it checks against are in
   out of the repository URL?
 - Are public API names, documentation, and defaults clear and consistent with
   the package's intended behavior?
-- Does the change follow the package's Swift tools version and existing naming
-  and formatting, and avoid unnecessary public API changes?
+- Does the demo package in `Demo/` build and run independently via
+  `swift build --package-path Demo`?
+- Are `README.md`, `AGENTS.md`, and `changelog.md` kept up to date with any
+  behavior changes?
 - Do focused tests cover the changed behavior, and is an actual consumer build
   needed in addition to headless tests?
 
