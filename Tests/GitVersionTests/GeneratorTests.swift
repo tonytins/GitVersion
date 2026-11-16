@@ -75,21 +75,54 @@ private func coreVersion(_ info: RepositoryInfo) -> String {
 
 // MARK: - Version parsing
 
-@Test(arguments: ["1.2.3", "v1.2.3", "0.0.0", "1.2.3-preview.1", "1.2.3-rc-1", "1.2.3-0a", " 1.2.3\n"])
+@Test(arguments: [
+    "1.2.3", "v1.2.3", "V1.2.3", "1.2", "v1.2", "0.0.0", "1.2.3-preview.1", "1.2-preview",
+    "1.2.3-rc-1", "1.2.3-0a", "preview-1.2.3", "release-v1.2.3", "version-1.2.3", " 1.2.3\n"
+])
 func acceptsValidVersions(_ value: String) {
     #expect(SemanticVersion(parsing: value) != nil)
 }
 
 @Test(arguments: [
-    "", "1", "1.2", "1.2.3.4", "01.2.3", "1.2.3-", "1.2.3-a..b", "1.2.3-.a", "1.2.3-a.", "1.2.3-01",
-    "1.2.3-é", "1.2.3+x", "x.y.z", "v2-beta"
+    "", "1", "1.2.3.4", "01.2.3", "1.2.3-", "1.2.3-a..b", "1.2.3-.a", "1.2.3-a.", "1.2.3-01",
+    "1.2.3-é", "1.2.3+x", "x.y.z", "v2-beta", "v", "vv1.2.3", "release-1.2", "-1.2.3", "1..3", "1.2."
 ])
 func rejectsInvalidVersions(_ value: String) {
     #expect(SemanticVersion(parsing: value) == nil)
 }
 
+@Test func parsesPartialVersionsAsPatchZero() throws {
+    let version = try #require(SemanticVersion(parsing: "v1.2"))
+    #expect(version.major == 1)
+    #expect(version.minor == 2)
+    #expect(version.patch == 0)
+    #expect(version.label == nil)
+}
+
+@Test func parsesLeadingLabelAsPrereleaseLabel() throws {
+    let version = try #require(SemanticVersion(parsing: "release-v2.0.0"))
+    #expect(version.description == "2.0.0-release")
+}
+
+@Test func keepsAVersionLikeLabelPrefixIntact() throws {
+    let version = try #require(SemanticVersion(parsing: "version-1.2.3"))
+    #expect(version.label == "version")
+    #expect(version.description == "1.2.3-version")
+}
+
+@Test(arguments: [
+    ("1.2-3.4.5", "1.2.0-3.4.5"),
+    ("1.2.3-preview-2.0.0", "1.2.3-preview-2.0.0")
+])
+func prefersTheStandardFormOverALeadingLabel(_ value: String, _ expected: String) throws {
+    #expect(try #require(SemanticVersion(parsing: value)).description == expected)
+}
+
 @Test func buildMetadataIsOnlyAcceptedWhenAllowed() {
     #expect(SemanticVersion(parsing: "1.2.3+x.y", allowsBuildMetadata: true)?.buildMetadata == "x.y")
+    #expect(SemanticVersion(parsing: "1.2+x", allowsBuildMetadata: true)?.description == "1.2.0+x")
+    #expect(SemanticVersion(parsing: "release-1.2.3+x", allowsBuildMetadata: true)?.description == "1.2.3-release+x")
+    #expect(SemanticVersion(parsing: "1.2.3+01", allowsBuildMetadata: true)?.buildMetadata == "01")
     #expect(SemanticVersion(parsing: "1.2.3+", allowsBuildMetadata: true) == nil)
     #expect(SemanticVersion(parsing: "1.2.3+a..b", allowsBuildMetadata: true) == nil)
 }
@@ -171,6 +204,20 @@ func readsContinuousIntegrationBranch(_ environment: [String: String], _ expecte
     #expect(info.commits == 1)
 }
 
+@Test func versionFileAcceptsPartialVersions() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitVersion.txt", contents: "1.2\n")
+    try repository.commit()
+    #expect(coreVersion(try repository.info()) == "1.2.1")
+}
+
+@Test func versionFileAcceptsLeadingLabels() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitVersion.txt", contents: "preview-1.2.3\n")
+    try repository.commit()
+    #expect(coreVersion(try repository.info()) == "1.2.4-preview")
+}
+
 @Test func tagOnHeadBeatsOlderVersionFile() throws {
     let repository = try TemporaryRepository()
     try repository.commitFile("GitVersion.txt", contents: "0.1.0\n")
@@ -225,7 +272,7 @@ func readsContinuousIntegrationBranch(_ environment: [String: String], _ expecte
     #expect(coreVersion(try repository.info()) == "1.0.0")
 }
 
-@Test(arguments: ["v2-beta", "release", "v1.2"])
+@Test(arguments: ["v2-beta", "release"])
 func skipsUnparseableTags(_ tag: String) throws {
     let repository = try TemporaryRepository()
     try repository.commit()
@@ -236,6 +283,24 @@ func skipsUnparseableTags(_ tag: String) throws {
     let info = try repository.info()
     #expect(coreVersion(info) == "1.0.2")
     #expect(info.baseTag == "v1.0.0")
+}
+
+@Test func twoPartTagIsAReset() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v1.2")
+    try repository.commit()
+    let info = try repository.info()
+    #expect(coreVersion(info) == "1.2.1")
+    #expect(info.baseTag == "v1.2")
+}
+
+@Test func leadingLabelTagBecomesAPrerelease() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "preview-2.0.0")
+    try repository.commit()
+    #expect(coreVersion(try repository.info()) == "2.0.1-preview")
 }
 
 @Test func tagWithBuildMetadataIsAReset() throws {
@@ -480,6 +545,11 @@ func invalidVersionFileFails(_ contents: String) throws {
     #expect(info.baseVersion.description == "1.2.7")
     #expect(info.commit == nil)
     #expect(info.warning == nil)
+}
+
+@Test func overrideAcceptsPartialVersions() throws {
+    let directory = try TemporaryRepository(initialize: false)
+    #expect(try directory.info(environment: ["GITVERSION_VERSION": "2.1"]).semanticVersion.description == "2.1.0")
 }
 
 @Test func overrideWorksInShallowClone() throws {

@@ -26,42 +26,37 @@ struct SemanticVersion: Equatable, CustomStringConvertible {
         self.buildMetadata = buildMetadata
     }
 
-    /// Parses a semantic version with an optional leading `v`.
+    /// Parses a semantic version using the same forms as a GitInfo base version.
+    ///
+    /// Accepted:
+    ///
+    /// - `1.2.3` or `1.2` (patch defaults to zero), with an optional leading
+    ///   `v` or `V`.
+    /// - A trailing prerelease label, such as `1.2.3-preview.1` or `1.2-beta`.
+    /// - A leading label, such as `preview-1.2.3`, which becomes `1.2.3-preview`.
     ///
     /// Build metadata is rejected unless `allowsBuildMetadata` is true, because
-    /// the generator adds its own to versions it calculates.
+    /// the generator adds its own to the versions it calculates.
     init?(parsing value: String, allowsBuildMetadata: Bool = false) {
-        var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("v") {
-            text.removeFirst()
-        }
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let metadataParts = text.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+        var core = text
         var buildMetadata: String?
-        if metadataParts.count == 2 {
-            guard allowsBuildMetadata, Self.isValidIdentifierList(metadataParts[1]) else { return nil }
-            buildMetadata = String(metadataParts[1])
+        if let plus = text.firstIndex(of: "+") {
+            let metadata = text[text.index(after: plus)...]
+            guard allowsBuildMetadata, Self.isValidIdentifierList(metadata) else { return nil }
+            buildMetadata = String(metadata)
+            core = String(text[..<plus])
         }
 
-        let labelParts = metadataParts[0].split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
-        let numbers = labelParts[0].split(separator: ".", omittingEmptySubsequences: false)
-        guard numbers.count == 3,
-              let major = Self.parseNumber(numbers[0]),
-              let minor = Self.parseNumber(numbers[1]),
-              let patch = Self.parseNumber(numbers[2]) else {
-            return nil
-        }
-
-        var label: String?
-        if labelParts.count == 2 {
-            guard Self.isValidIdentifierList(labelParts[1]),
-                  !labelParts[1].split(separator: ".").contains(where: Self.hasLeadingZero) else {
-                return nil
-            }
-            label = String(labelParts[1])
-        }
-
-        self.init(major: major, minor: minor, patch: patch, label: label, buildMetadata: buildMetadata)
+        guard let components = Self.parseCore(core) else { return nil }
+        self.init(
+            major: components.major,
+            minor: components.minor,
+            patch: components.patch,
+            label: components.label,
+            buildMetadata: buildMetadata
+        )
     }
 
     /// Whether this version sorts before `other` under semantic version precedence.
@@ -80,6 +75,75 @@ struct SemanticVersion: Equatable, CustomStringConvertible {
         case let (label?, otherLabel?):
             return Self.labelPrecedes(label, otherLabel)
         }
+    }
+
+    private struct Components {
+        let major: Int
+        let minor: Int
+        let patch: Int
+        let label: String?
+    }
+
+    /// Parses a version without build metadata.
+    ///
+    /// The standard form is tried before the leading-label form so that
+    /// `1.2-3.4.5` reads as `1.2.0` with the label `3.4.5`, not as `3.4.5`
+    /// with the label `1.2`. The leading `v` is only stripped for the standard
+    /// form, because it may belong to the label (`version-1.2.3`).
+    private static func parseCore(_ text: String) -> Components? {
+        let unprefixed = text.hasPrefix("v") || text.hasPrefix("V") ? text.dropFirst() : Substring(text)
+        return parseNumbers(unprefixed) ?? parseLabelPrefixed(text)
+    }
+
+    /// Parses `M.m[.p][-label]`. The label may contain dashes.
+    private static func parseNumbers(_ text: Substring) -> Components? {
+        let labelStart = text.firstIndex(of: "-")
+        let numbers = labelStart.map { text[..<$0] } ?? text
+        let label = labelStart.map { text[text.index(after: $0)...] }
+
+        let components = numbers.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count == 2 || components.count == 3,
+              let major = parseNumber(components[0]),
+              let minor = parseNumber(components[1]) else {
+            return nil
+        }
+        let patch = components.count == 3 ? parseNumber(components[2]) : 0
+        guard let patch else { return nil }
+
+        var parsedLabel: String?
+        if let label {
+            guard isValidIdentifierList(label),
+                  !label.split(separator: ".").contains(where: hasLeadingZero) else {
+                return nil
+            }
+            parsedLabel = String(label)
+        }
+        return Components(major: major, minor: minor, patch: patch, label: parsedLabel)
+    }
+
+    /// Parses `label-M.m.p`. The label may contain dashes, so each dash is
+    /// tried from the right until one is followed by a complete version. The
+    /// version after the dash may carry a leading `v`.
+    private static func parseLabelPrefixed(_ text: String) -> Components? {
+        var searchEnd = text.endIndex
+        while let dash = text[..<searchEnd].lastIndex(of: "-") {
+            let label = text[..<dash]
+            var version = text[text.index(after: dash)...]
+            if version.hasPrefix("v") || version.hasPrefix("V") {
+                version = version.dropFirst()
+            }
+            let components = version.split(separator: ".", omittingEmptySubsequences: false)
+            if components.count == 3,
+               let major = parseNumber(components[0]),
+               let minor = parseNumber(components[1]),
+               let patch = parseNumber(components[2]),
+               isValidIdentifierList(label),
+               !label.split(separator: ".").contains(where: hasLeadingZero) {
+                return Components(major: major, minor: minor, patch: patch, label: String(label))
+            }
+            searchEnd = dash
+        }
+        return nil
     }
 
     private static func parseNumber(_ value: Substring) -> Int? {
