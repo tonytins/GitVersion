@@ -14,6 +14,7 @@ private let baseEnvironment: [String: String] = [
 private final class TemporaryRepository {
     let root: URL
     private let git: GitCommand
+    private var commitCount = 0
 
     init(initialize: Bool = true) throws {
         root = FileManager.default.temporaryDirectory
@@ -38,7 +39,10 @@ private final class TemporaryRepository {
     }
 
     func commit(_ message: String = "commit") throws {
-        try run("commit", "-q", "--allow-empty", "-m", message)
+        commitCount += 1
+        // A counter keeps root commits with the same message from collapsing
+        // into one object, which would make separate branches share history.
+        try run("commit", "-q", "--allow-empty", "-m", "\(message) \(commitCount)")
     }
 
     func commitFile(_ path: String, contents: String = "x\n", message: String = "change") throws {
@@ -240,13 +244,15 @@ func readsContinuousIntegrationBranch(_ environment: [String: String], _ expecte
     #expect(info.baseTag == "v5.0.0")
 }
 
-@Test func versionFileChangeBeatsOlderTag() throws {
+@Test func versionFileDoesNotOverrideAnOlderTag() throws {
     let repository = try TemporaryRepository()
     try repository.commit()
     try repository.run("tag", "v5.0.0")
     try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
     try repository.commit()
-    #expect(coreVersion(try repository.info()) == "6.0.1")
+    let info = try repository.info()
+    #expect(coreVersion(info) == "5.0.2")
+    #expect(info.baseTag == "v5.0.0")
 }
 
 @Test func tagWinsOverVersionFileOnSameCommit() throws {
@@ -329,6 +335,121 @@ func skipsUnparseableTags(_ tag: String) throws {
     try repository.run("checkout", "-q", "main")
     try repository.run("merge", "-q", "--no-ff", "-m", "merge", "side")
     #expect(coreVersion(try repository.info()) == "1.0.1")
+}
+
+// MARK: - Version branches
+
+@Test func branchVersionWinsOverTagAndVersionFile() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitVersion.txt", contents: "9.9.9\n")
+    try repository.run("tag", "v8.8.8")
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.commit()
+    let info = try repository.info()
+    #expect(coreVersion(info) == "1.2.4")
+    #expect(info.baseTag == nil)
+}
+
+@Test(arguments: [
+    ("feature/1.2.3", "1.2.4"),
+    ("release/1.2", "1.2.1"),
+    ("preview-2.0.0", "2.0.1-preview")
+])
+func branchNameEncodesBaseVersion(_ branch: String, _ expected: String) throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "-b", branch)
+    try repository.commit()
+    #expect(coreVersion(try repository.info()) == expected)
+}
+
+@Test func branchCountsOnlyCommitsSinceTheForkPoint() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "-b", "release/1.0.0")
+    try repository.run("checkout", "-q", "main")
+    try repository.commit()
+    try repository.commit()
+    try repository.run("checkout", "-q", "release/1.0.0")
+    try repository.commit()
+    try repository.commit()
+    #expect(coreVersion(try repository.info()) == "1.0.2")
+}
+
+@Test func danglingOriginHeadFallsBackToLocalDefaultBranch() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.commit()
+    try repository.run("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+    let info = try repository.info()
+    #expect(coreVersion(info) == "1.2.4")
+    #expect(info.warning == nil)
+}
+
+@Test func ignoreBranchVersionFallsBackToTag() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v0.1.0")
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.commit()
+    let info = try repository.info(environment: ["GITVERSION_IGNORE_BRANCH_VERSION": "true"])
+    #expect(coreVersion(info) == "0.1.1")
+    #expect(info.baseTag == "v0.1.0")
+}
+
+@Test func ignoreBranchVersionRequiresATruthyValue() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.commit()
+    #expect(coreVersion(try repository.info(environment: ["GITVERSION_IGNORE_BRANCH_VERSION": "0"])) == "1.2.4")
+    #expect(coreVersion(try repository.info(environment: ["GITVERSION_IGNORE_BRANCH_VERSION": "no"])) == "1.2.4")
+}
+
+@Test func missingForkPointWarnsAndFallsBackToTag() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v0.1.0")
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.commit()
+    try repository.run("branch", "-D", "main")
+    let info = try repository.info()
+    #expect(coreVersion(info) == "0.1.1")
+    #expect(info.warning != nil)
+    #expect(info.baseTag == "v0.1.0")
+}
+
+@Test func unrelatedBranchHistoryWarnsAndUsesDefaultVersion() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "--orphan", "release/1.2.3")
+    try repository.commit()
+    let info = try repository.info()
+    #expect(coreVersion(info) == "0.1.0")
+    #expect(info.warning != nil)
+}
+
+@Test func continuousIntegrationBranchCanEncodeTheBaseVersion() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.commit()
+    try repository.run("checkout", "-q", "--detach")
+    let head = try repository.run("rev-parse", "HEAD")
+    let info = try repository.info(environment: ["GIT_COMMIT": head, "GIT_BRANCH": "release/1.2.3"])
+    #expect(coreVersion(info) == "1.2.4")
+}
+
+@Test func exactTagIsReportedWhenABranchProvidesTheBaseVersion() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("checkout", "-q", "-b", "release/1.2.3")
+    try repository.run("tag", "nightly")
+    let info = try repository.info()
+    #expect(coreVersion(info) == "1.2.3")
+    #expect(info.tag == "nightly")
+    #expect(info.baseTag == nil)
 }
 
 // MARK: - First-parent counting

@@ -261,8 +261,50 @@ private func readTags(git: GitCommand, root: URL) throws -> [VersionTag] {
 }
 
 private struct Reset {
-    let historyIndex: Int
+    /// The commit that the version counts from.
+    let start: String
     let version: SemanticVersion
+}
+
+/// Returns the version encoded in a branch name, such as `release/1.2.3`.
+private func branchVersion(_ branch: String) -> SemanticVersion? {
+    let candidate = branch.lastIndex(where: { $0 == "/" || $0 == "\\" })
+        .map { branch[branch.index(after: $0)...] } ?? branch[...]
+    return SemanticVersion(parsing: String(candidate))
+}
+
+/// Resolves the branch a version branch forked from.
+private func defaultBranch(git: GitCommand, root: URL) throws -> String? {
+    if let head = try git.optionalOutput(
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        in: root
+    ), !head.isEmpty,
+       try git.optionalOutput(["rev-parse", "--verify", "--quiet", head], in: root) != nil {
+        return head
+    }
+    for name in ["main", "master"] {
+        if try git.optionalOutput(
+            ["rev-parse", "--verify", "--quiet", "refs/heads/\(name)"],
+            in: root
+        ) != nil {
+            return name
+        }
+        if try git.optionalOutput(
+            ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(name)"],
+            in: root
+        ) != nil {
+            return "origin/\(name)"
+        }
+    }
+    return nil
+}
+
+/// Whether a switch is set. Only recognized positive values enable it.
+private func isTruthy(_ value: String?) -> Bool {
+    guard let value else { return false }
+    return ["1", "true", "yes", "on"].contains(
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    )
 }
 
 private func repositoryInfo(package: URL, environment: [String: String]) throws -> RepositoryInfo {
@@ -282,7 +324,7 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
     let branch = try git.optionalOutput(["symbolic-ref", "--quiet", "--short", "HEAD"], in: root)
         ?? continuousIntegrationBranch(in: environment, commit: fullCommit)
 
-    // The first-parent history is ordered from HEAD, so a smaller index is a closer reset.
+    // The first-parent history is ordered from HEAD, so a smaller index is a closer tag.
     let history = try git.output(["rev-list", "--first-parent", "HEAD"], in: root)
         .split(separator: "\n")
         .map(String.init)
@@ -292,49 +334,85 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
     )
 
     let tags = try readTags(git: git, root: root)
-    var closestTag: (tag: VersionTag, reset: Reset)?
+    var closestTag: (tag: VersionTag, index: Int, version: SemanticVersion)?
     for tag in tags {
         guard let version = tag.version, let index = historyIndexes[tag.commit] else { continue }
         guard let current = closestTag else {
-            closestTag = (tag, Reset(historyIndex: index, version: version))
+            closestTag = (tag, index, version)
             continue
         }
-        if index < current.reset.historyIndex
-            || (index == current.reset.historyIndex && current.reset.version.hasLowerPrecedence(than: version)) {
-            closestTag = (tag, Reset(historyIndex: index, version: version))
+        if index < current.index
+            || (index == current.index && current.version.hasLowerPrecedence(than: version)) {
+            closestTag = (tag, index, version)
         }
     }
 
     let versionFile = try findVersionFile(root: root, packagePrefix: packagePrefix)
-    var fileReset: Reset?
-    if let versionFile {
+
+    var warning: String?
+    var baseTag: String?
+    var reset: Reset?
+
+    // A version branch wins over a tag, the version file, and the default.
+    if !isTruthy(environment["GITVERSION_IGNORE_BRANCH_VERSION"]),
+       let branch,
+       let version = branchVersion(branch) {
+        let defaultBranch = try defaultBranch(git: git, root: root)
+        if let defaultBranch {
+            let forkPoint = try git.run(["merge-base", "--fork-point", defaultBranch, "HEAD"], in: root)
+            if forkPoint.status == 0, !forkPoint.output.isEmpty {
+                reset = Reset(start: forkPoint.output, version: version)
+            } else {
+                warning = """
+                GitVersion could not determine where branch '\(branch)' forked from '\(defaultBranch)', \
+                so it did not use \(version) as the base version.
+                """
+            }
+        } else {
+            warning = """
+            GitVersion could not find a default branch to compare with '\(branch)', \
+            so it did not use \(version) as the base version.
+            """
+        }
+    }
+
+    if reset == nil, let closestTag {
+        reset = Reset(start: closestTag.tag.commit, version: closestTag.version)
+        baseTag = closestTag.tag.name
+    }
+
+    if reset == nil, let versionFile {
         let lastChange = try git.output(
             ["rev-list", "-1", "--first-parent", "HEAD", "--", versionFile.path],
             in: root
         )
         // A file with no committed history takes effect at HEAD.
-        fileReset = Reset(historyIndex: historyIndexes[lastChange] ?? 0, version: versionFile.version)
+        reset = Reset(start: lastChange.isEmpty ? fullCommit : lastChange, version: versionFile.version)
     }
 
-    let reset: Reset
-    switch (closestTag?.reset, fileReset) {
-    case let (tagReset?, fileReset?):
-        reset = tagReset.historyIndex <= fileReset.historyIndex ? tagReset : fileReset
-    case let (tagReset?, nil):
-        reset = tagReset
-    case let (nil, fileReset?):
-        reset = fileReset
-    case (nil, nil):
-        reset = Reset(historyIndex: history.count - 1, version: SemanticVersion(major: 0, minor: 1, patch: 0))
+    let baseReset: Reset
+    if let reset {
+        baseReset = reset
+    } else if let initialCommit = history.last {
+        baseReset = Reset(
+            start: initialCommit,
+            version: SemanticVersion(major: 0, minor: 1, patch: 0)
+        )
+    } else {
+        throw GeneratorError.gitCommandFailed(
+            command: "rev-list --first-parent HEAD",
+            reason: "Git returned no commits."
+        )
     }
+
     let baseVersion = SemanticVersion(
-        major: reset.version.major,
-        minor: reset.version.minor,
-        patch: reset.version.patch,
-        label: reset.version.label
+        major: baseReset.version.major,
+        minor: baseReset.version.minor,
+        patch: baseReset.version.patch,
+        label: baseReset.version.label
     )
 
-    var countArguments = ["rev-list", "--first-parent", "--count", "\(history[reset.historyIndex])..HEAD"]
+    var countArguments = ["rev-list", "--first-parent", "--count", "\(baseReset.start)..HEAD"]
     if let directory = versionFile?.directory, !directory.isEmpty {
         countArguments += ["--", directory]
     }
@@ -356,7 +434,7 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
         .joined(separator: ".")
 
     let tagsAtHead = tags.filter { $0.commit == fullCommit }
-    let exactTag = closestTag.flatMap { $0.reset.historyIndex == 0 ? $0.tag.name : nil }
+    let exactTag = closestTag.flatMap { $0.index == 0 ? $0.tag.name : nil }
         ?? tagsAtHead.first?.name
 
     return RepositoryInfo(
@@ -367,7 +445,7 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
         commitDate: commitDate,
         commits: commitCount,
         tag: exactTag,
-        baseTag: closestTag?.tag.name,
+        baseTag: baseTag,
         isDirty: isDirty,
         baseVersion: baseVersion,
         semanticVersion: SemanticVersion(
@@ -377,6 +455,6 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
             label: baseVersion.label,
             buildMetadata: metadata
         ),
-        warning: nil
+        warning: warning
     )
 }
