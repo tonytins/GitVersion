@@ -53,7 +53,12 @@ struct GitVersionPlugin: BuildToolPlugin {
             }
             .first { FileManager.default.fileExists(atPath: $0.path) }
 
-        return ((inputs ?? []) + (versionFile.map { [$0] } ?? []))
+        // The settings file is found the same way. Keep its name in step with `settingsFileName`.
+        let settingsFile = versionFileDirectories
+            .map { $0.appendingPathComponent("GitVersion.env") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+
+        return ((inputs ?? []) + [versionFile, settingsFile].compactMap { $0 })
             .filter { FileManager.default.fileExists(atPath: $0.path) }
             .map { Path($0.path) }
     }

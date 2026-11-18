@@ -85,6 +85,12 @@ path segment of the tag name is the version, so `v1.2.3`, `1.2.3`, and
 A tag always beats `GitVersion.txt`, even when the file changed later. To start
 a new major or minor line, tag the release commit or use a version branch.
 
+Set `GITVERSION_IGNORE_TAG_VERSION=1` to skip tags, so the version file alone
+sets the base, as GitInfo's `GitIgnoreTagVersion` does. This suits a repository
+whose tags mark releases but whose version file moves to the next one as soon
+as work on it begins. The tag on `HEAD` is still reported. The values `true`,
+`yes`, and `on` also work, in any case.
+
 ### `GitVersion.txt`
 
 `GitVersion.txt` holds a base version such as `1.2.3` or `1.2.3-preview.1`.
@@ -136,6 +142,27 @@ Tags and branch versions apply to the whole repository, but only commits that
 touched the scope advance the patch. A package beside another package's
 `GitVersion.txt` does not use that file, and does not count its commits.
 
+## Settings for every build
+
+Switches a repository always wants can live in a `GitVersion.env` file, so every
+build gets them without anyone setting the environment. GitVersion searches for
+it from the package directory up to the repository root, like a version file,
+and uses the first one it finds.
+
+```sh
+# Releases are tagged, but GitVersion.txt names the version being built.
+GITVERSION_IGNORE_TAG_VERSION=true
+```
+
+Each line is `NAME=value`; blank lines and lines starting with `#` are ignored.
+It may set `GITVERSION_IGNORE_TAG_VERSION`, `GITVERSION_IGNORE_BRANCH_VERSION`,
+and `GITVERSION_ABBREV`. Any other name, a line without `=`, or a name set twice
+fails the build. `GITVERSION_VERSION` can't be set here, since a fixed version
+would stop counting commits.
+
+A variable set in the environment, even to nothing, wins over the file. Changes
+to the file are noticed like changes to a version file.
+
 ## Build metadata
 
 The version adds the normalized branch and abbreviated commit as build metadata,
@@ -169,8 +196,10 @@ can lag** after an unstaged edit or a new untracked file. The next commit or
 staged change corrects it. Run a clean build, or check `git status` in your
 release process, if a release must prove it is clean.
 
-`GITVERSION_VERSION` and `GITVERSION_ABBREV` are read when the generator runs and
-are not plugin inputs. Changing either requires a clean build.
+`GITVERSION_VERSION`, `GITVERSION_ABBREV`, and the `GITVERSION_IGNORE_*` switches
+are read from the environment when the generator runs and are not plugin inputs.
+Changing one in the environment requires a clean build; changing `GitVersion.env`
+does not.
 
 ## Builds without full history
 

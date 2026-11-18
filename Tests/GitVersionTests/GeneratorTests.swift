@@ -457,6 +457,99 @@ func branchNameEncodesBaseVersion(_ branch: String, _ expected: String) throws {
     #expect(coreVersion(try repository.info(environment: ["GITVERSION_IGNORE_BRANCH_VERSION": "no"])) == "1.2.4")
 }
 
+@Test func ignoreTagVersionCountsFromTheVersionFile() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
+    try repository.commit()
+    let info = try repository.info(environment: [ignoreTagVersionVariable: "true"])
+    #expect(coreVersion(info) == "6.0.1")
+    #expect(info.baseTag == nil)
+}
+
+@Test func ignoreTagVersionStillReportsTheTagOnHead() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
+    try repository.run("tag", "v5.0.0")
+    let info = try repository.info(environment: [ignoreTagVersionVariable: "1"])
+    #expect(coreVersion(info) == "6.0.0")
+    #expect(info.tag == "v5.0.0")
+}
+
+@Test func ignoreTagVersionRequiresATruthyValue() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
+    #expect(coreVersion(try repository.info(environment: [ignoreTagVersionVariable: "no"])) == "5.0.1")
+}
+
+@Test func ignoreTagVersionWithNoVersionFileUsesTheDefault() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commit()
+    #expect(coreVersion(try repository.info(environment: [ignoreTagVersionVariable: "yes"])) == "0.1.1")
+}
+
+@Test func settingsFileSetsSwitchesForEveryBuild() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
+    try repository.commitFile(settingsFileName, contents: "# Releases are tagged; the file names the version.\n\nGITVERSION_IGNORE_TAG_VERSION = true\nGITVERSION_ABBREV=8\n")
+    let info = try repository.info()
+    #expect(coreVersion(info) == "6.0.1")
+    #expect(info.commit?.count == 8)
+}
+
+@Test func environmentWinsOverTheSettingsFile() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
+    try repository.commitFile(settingsFileName, contents: "GITVERSION_IGNORE_TAG_VERSION=true\n")
+    #expect(coreVersion(try repository.info(environment: [ignoreTagVersionVariable: "false"])) == "5.0.2")
+}
+
+@Test func closestSettingsFileToPackageWins() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\n")
+    try repository.commitFile(settingsFileName, contents: "GITVERSION_IGNORE_TAG_VERSION=true\n")
+    try repository.commitFile("app/\(settingsFileName)", contents: "GITVERSION_ABBREV=6\n")
+    let info = try repository.info(package: "app")
+    // The closer file doesn't ignore tags, so the tag counts the three commits after it.
+    #expect(coreVersion(info) == "5.0.3")
+    #expect(info.commit?.count == 6)
+}
+
+@Test func settingsFileReadsWindowsLineEndings() throws {
+    let repository = try TemporaryRepository()
+    try repository.commit()
+    try repository.run("tag", "v5.0.0")
+    try repository.commitFile("GitVersion.txt", contents: "6.0.0\r\n")
+    try repository.commitFile(settingsFileName, contents: "GITVERSION_IGNORE_TAG_VERSION=on\r\n")
+    #expect(coreVersion(try repository.info()) == "6.0.1")
+}
+
+@Test(arguments: [
+    "GITVERSION_VERSION=1.0.0\n",
+    "GITVERSION_IGNORE_TAGS=true\n",
+    "GITVERSION_IGNORE_TAG_VERSION\n",
+    "GITVERSION_ABBREV=8\nGITVERSION_ABBREV=9\n",
+    "GITVERSION_ABBREV=3\n"
+])
+func invalidSettingsFileFails(_ contents: String) throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile(settingsFileName, contents: contents)
+    #expect(throws: GeneratorError.self) {
+        try repository.info()
+    }
+}
+
 @Test func missingForkPointWarnsAndFallsBackToTag() throws {
     let repository = try TemporaryRepository()
     try repository.commit()

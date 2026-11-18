@@ -78,8 +78,13 @@ convenience.
   versions.
 - **Read a tag's last path segment** as its version, so `v1.2.3`, `1.2.3`, and
   `release/v1.2.3` all reset. Skip tags whose segment is not a version.
-- **Never let `GitVersion.txt` override an existing tag.** The file is a baseline
-  for repositories without tags, not a release switch; tag only real releases.
+- **Never let `GitVersion.txt` override an existing tag** unless
+  `GITVERSION_IGNORE_TAG_VERSION` is set. The file is a baseline for
+  repositories without tags, not a release switch; tag only real releases.
+- **Read `GitVersion.env`** from the package directory up to the root, closest
+  first, for `GITVERSION_IGNORE_TAG_VERSION`, `GITVERSION_IGNORE_BRANCH_VERSION`,
+  and `GITVERSION_ABBREV` only. Fail on anything else, a line without `=`, or a
+  name set twice. A variable in the environment, even empty, wins.
 - **Accept `GitInfo.txt` as an alternate version file** with identical rules.
   In one directory `GitVersion.txt` wins; the nearest directory always wins.
 - **Scope counting to one path**: the version file's directory when one is found,
@@ -130,8 +135,8 @@ convenience.
 - **The demo is a separate package under `Demo/`**; keep it building and running
   via `swift build --package-path Demo` and `swift run --package-path Demo GitVersionDemo`.
 - **Environment overrides are read at generation time**; `GITVERSION_VERSION`,
-  `GITVERSION_ABBREV`, and `GITVERSION_IGNORE_BRANCH_VERSION` are not plugin
-  inputs, so changing them requires a clean build.
+  `GITVERSION_ABBREV`, and the `GITVERSION_IGNORE_*` switches are not plugin
+  inputs, so changing them requires a clean build. `GitVersion.env` is an input.
 - **Follow the package's Swift tools version and existing naming and formatting**,
   and keep public APIs clear at the call site with documentation where names
   alone are not sufficient.

@@ -1,5 +1,16 @@
 # GitVersion Changelog
 
+## 0.3.2
+
+- **`GITVERSION_IGNORE_TAG_VERSION` skips tags**, so the version file alone sets
+  the base, as GitInfo's `GitIgnoreTagVersion` does. The tag on `HEAD` is still
+  reported.
+- **`GitVersion.env` keeps switches with the repository.** It holds
+  `GITVERSION_IGNORE_TAG_VERSION`, `GITVERSION_IGNORE_BRANCH_VERSION`, and
+  `GITVERSION_ABBREV` as `NAME=value` lines, found like a version file, so every
+  build gets them. The environment wins over the file, and anything else in it
+  fails the build.
+
 ## 0.3.1
 
 - **`GitInfo.txt` is read as a version file.** Projects coming from GitInfo can

@@ -5,8 +5,17 @@ import Foundation
 let versionFileNames = ["GitVersion.txt", "GitInfo.txt"]
 let versionOverrideVariable = "GITVERSION_VERSION"
 let abbreviationVariable = "GITVERSION_ABBREV"
+let ignoreBranchVersionVariable = "GITVERSION_IGNORE_BRANCH_VERSION"
+let ignoreTagVersionVariable = "GITVERSION_IGNORE_TAG_VERSION"
 let defaultAbbreviation = 12
 let abbreviationRange = 4...40
+
+/// A file of switches a repository always wants, so every build gets them without setting the environment.
+let settingsFileName = "GitVersion.env"
+
+/// The variables a settings file may set. `GITVERSION_VERSION` isn't one: a version fixed in the repository
+/// would stop counting commits, which is what tags and version files are for.
+let settingsVariables: Set<String> = [abbreviationVariable, ignoreBranchVersionVariable, ignoreTagVersionVariable]
 
 public struct RepositoryInfo {
     let repositoryURL: String?
@@ -32,6 +41,7 @@ public enum GeneratorError: Error, CustomStringConvertible {
     case unreadableVersionFile(URL, reason: String)
     case invalidVersionOverride(String)
     case invalidAbbreviation(String)
+    case invalidSettingsFile(URL, line: Int, reason: String)
     case versionOverflow
     case fileSystem(String)
 
@@ -60,6 +70,8 @@ public enum GeneratorError: Error, CustomStringConvertible {
             \(abbreviationVariable) must be a whole number from \
             \(abbreviationRange.lowerBound) to \(abbreviationRange.upperBound), but was '\(value)'.
             """
+        case .invalidSettingsFile(let url, let line, let reason):
+            return "\(url.path), line \(line): \(reason)"
         case .versionOverflow:
             return "The patch version overflowed while adding commits since the version baseline."
         case .fileSystem(let message):
@@ -247,6 +259,57 @@ private func findVersionFile(root: URL, packagePrefix: String) throws -> Version
     return nil
 }
 
+/// Reads the settings file closest to the package, from its directory up to the repository root.
+///
+/// Each line is `NAME=value`, with blank lines and lines starting with `#` ignored. A name it doesn't allow, a
+/// line without `=`, or a name set twice fails the build rather than being skipped, since a misspelled switch
+/// would otherwise build the wrong version without a word.
+func readSettings(root: URL, packagePrefix: String) throws -> [String: String] {
+    let components = packagePrefix.split(separator: "/").map(String.init)
+    for depth in stride(from: components.count, through: 0, by: -1) {
+        let directory = components.prefix(depth).joined(separator: "/")
+        let url = root.appendingPathComponent(directory.isEmpty ? settingsFileName : "\(directory)/\(settingsFileName)")
+        if FileManager.default.fileExists(atPath: url.path) {
+            return try readSettingsFile(url)
+        }
+    }
+    return [:]
+}
+
+func readSettingsFile(_ url: URL) throws -> [String: String] {
+    let contents: String
+    do {
+        contents = try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        throw GeneratorError.unreadableVersionFile(url, reason: error.localizedDescription)
+    }
+
+    var settings: [String: String] = [:]
+    for (offset, rawLine) in contents.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty || line.hasPrefix("#") {
+            continue
+        }
+        guard let equals = line.firstIndex(of: "=") else {
+            throw GeneratorError.invalidSettingsFile(url, line: offset + 1, reason: "expected NAME=value.")
+        }
+        let name = line[..<equals].trimmingCharacters(in: .whitespaces)
+        let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+        guard settingsVariables.contains(name) else {
+            throw GeneratorError.invalidSettingsFile(
+                url,
+                line: offset + 1,
+                reason: "\(name) can't be set here; use one of \(settingsVariables.sorted().joined(separator: ", "))."
+            )
+        }
+        guard settings[name] == nil else {
+            throw GeneratorError.invalidSettingsFile(url, line: offset + 1, reason: "\(name) is set twice.")
+        }
+        settings[name] = value
+    }
+    return settings
+}
+
 private struct VersionTag {
     let name: String
     let commit: String
@@ -353,11 +416,15 @@ private func projectScope(versionFile: VersionFile?, packagePrefix: String) -> S
     return packagePrefix.hasSuffix("/") ? String(packagePrefix.dropLast()) : packagePrefix
 }
 
-private func repositoryInfo(package: URL, environment: [String: String]) throws -> RepositoryInfo {
-    let git = try GitCommand(environment: environment)
+private func repositoryInfo(package: URL, environment processEnvironment: [String: String]) throws -> RepositoryInfo {
+    let git = try GitCommand(environment: processEnvironment)
     let rootPath = try git.output(["rev-parse", "--show-toplevel"], in: package)
     let packagePrefix = try git.output(["rev-parse", "--show-prefix"], in: package)
     let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+
+    // A variable set in the environment, even to nothing, wins over the settings file.
+    let environment = try readSettings(root: root, packagePrefix: packagePrefix)
+        .merging(processEnvironment) { _, set in set }
 
     guard try git.output(["rev-parse", "--is-shallow-repository"], in: root) != "true" else {
         throw GeneratorError.shallowRepository
@@ -402,7 +469,7 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
     var reset: Reset?
 
     // A version branch wins over a tag, the version file, and the default.
-    if !isTruthy(environment["GITVERSION_IGNORE_BRANCH_VERSION"]),
+    if !isTruthy(environment[ignoreBranchVersionVariable]),
        let branch,
        let version = branchVersion(branch) {
         let defaultBranch = try defaultBranch(git: git, root: root)
@@ -424,7 +491,8 @@ private func repositoryInfo(package: URL, environment: [String: String]) throws 
         }
     }
 
-    if reset == nil, let closestTag {
+    // A tag wins over the version file, unless the repository counts from the file alone.
+    if reset == nil, !isTruthy(environment[ignoreTagVersionVariable]), let closestTag {
         reset = Reset(start: closestTag.tag.commit, version: closestTag.version)
         baseTag = closestTag.tag.name
     }
