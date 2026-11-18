@@ -80,6 +80,8 @@ convenience.
   `release/v1.2.3` all reset. Skip tags whose segment is not a version.
 - **Never let `GitVersion.txt` override an existing tag.** The file is a baseline
   for repositories without tags, not a release switch; tag only real releases.
+- **Accept `GitInfo.txt` as an alternate version file** with identical rules.
+  In one directory `GitVersion.txt` wins; the nearest directory always wins.
 - **Scope counting to one path**: the version file's directory when one is found,
   otherwise the package directory when below the root, otherwise the whole
   repository. Apply the same scope to every source.

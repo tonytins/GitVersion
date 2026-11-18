@@ -44,10 +44,13 @@ struct GitVersionPlugin: BuildToolPlugin {
         }
 
         // Inside a repository the closest version file up to its root is used.
-        // Outside one, only the package's own file is.
+        // Outside one, only the package's own file is. Keep the names and their
+        // order in step with `versionFileNames` in the generator.
         let versionFileDirectories = inputs == nil ? [package] : searched
         let versionFile = versionFileDirectories
-            .map { $0.appendingPathComponent("GitVersion.txt") }
+            .flatMap { directory in
+                ["GitVersion.txt", "GitInfo.txt"].map { directory.appendingPathComponent($0) }
+            }
             .first { FileManager.default.fileExists(atPath: $0.path) }
 
         return ((inputs ?? []) + (versionFile.map { [$0] } ?? []))

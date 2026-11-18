@@ -208,6 +208,36 @@ func readsContinuousIntegrationBranch(_ environment: [String: String], _ expecte
     #expect(info.commits == 1)
 }
 
+@Test func incrementsFromGitInfoFile() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitInfo.txt", contents: "2.1.0\n")
+    try repository.commit()
+    let info = try repository.info()
+    #expect(coreVersion(info) == "2.1.1")
+    #expect(info.commits == 1)
+}
+
+@Test func gitVersionFileBeatsGitInfoFileInSameDirectory() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitVersion.txt", contents: "3.0.0\n")
+    try repository.commitFile("GitInfo.txt", contents: "2.0.0\n")
+    // The GitInfo.txt commit counts on top of GitVersion.txt's base.
+    #expect(coreVersion(try repository.info()) == "3.0.1")
+}
+
+@Test func closerGitInfoFileBeatsGitVersionFileAbove() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitVersion.txt", contents: "1.0.0\n")
+    try repository.commitFile("app/GitInfo.txt", contents: "2.0.0\n")
+    #expect(coreVersion(try repository.info(package: "app")) == "2.0.0")
+}
+
+@Test func invalidGitInfoFileFails() throws {
+    let repository = try TemporaryRepository()
+    try repository.commitFile("GitInfo.txt", contents: "not a version\n")
+    #expect(throws: GeneratorError.self) { try repository.info() }
+}
+
 @Test func versionFileAcceptsPartialVersions() throws {
     let repository = try TemporaryRepository()
     try repository.commitFile("GitVersion.txt", contents: "1.2\n")
@@ -732,6 +762,12 @@ func invalidVersionFileFails(_ contents: String) throws {
     let directory = try TemporaryRepository(initialize: false)
     try directory.write("GitVersion.txt", contents: "1.2.0\n")
     #expect(try directory.info().semanticVersion.description == "1.2.0+unknown")
+}
+
+@Test func noRepositoryUsesGitInfoFileAsUnknownBaseline() throws {
+    let directory = try TemporaryRepository(initialize: false)
+    try directory.write("GitInfo.txt", contents: "1.3.0\n")
+    #expect(try directory.info().semanticVersion.description == "1.3.0+unknown")
 }
 
 @Test func noRepositoryDoesNotNeedGit() throws {

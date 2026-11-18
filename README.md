@@ -92,6 +92,10 @@ GitVersion searches from the package directory up to the repository root and
 uses the first file it finds. The file supplies the base only when no version
 branch or tag applies, and the count starts at the commit that last changed it.
 
+For projects coming from [GitInfo](https://github.com/devlooped/GitInfo),
+`GitInfo.txt` works the same way. When a directory holds both files,
+`GitVersion.txt` wins; a closer file always beats one further up.
+
 ### Default version
 
 With no branch, tag, or file, the version starts at `0.1.0` at the oldest commit

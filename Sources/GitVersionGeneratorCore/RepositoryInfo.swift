@@ -1,6 +1,8 @@
 import Foundation
 
-let versionFileName = "GitVersion.txt"
+/// Version file names in order of preference. `GitInfo.txt` is accepted for projects
+/// coming from GitInfo; when both are in one directory, `GitVersion.txt` wins.
+let versionFileNames = ["GitVersion.txt", "GitInfo.txt"]
 let versionOverrideVariable = "GITVERSION_VERSION"
 let abbreviationVariable = "GITVERSION_ABBREV"
 let defaultAbbreviation = 12
@@ -153,10 +155,10 @@ private func overriddenInfo(_ override: String) throws -> RepositoryInfo {
 }
 
 private func unknownInfo(package: URL) throws -> RepositoryInfo {
-    let file = package.appendingPathComponent(versionFileName)
-    let baseVersion = FileManager.default.fileExists(atPath: file.path)
-        ? try readVersionFile(file)
-        : SemanticVersion(major: 0, minor: 0, patch: 0)
+    let file = versionFileNames
+        .map { package.appendingPathComponent($0) }
+        .first { FileManager.default.fileExists(atPath: $0.path) }
+    let baseVersion = try file.map(readVersionFile) ?? SemanticVersion(major: 0, minor: 0, patch: 0)
     let version = SemanticVersion(
         major: baseVersion.major,
         minor: baseVersion.minor,
@@ -234,10 +236,12 @@ private func findVersionFile(root: URL, packagePrefix: String) throws -> Version
     let components = packagePrefix.split(separator: "/").map(String.init)
     for depth in stride(from: components.count, through: 0, by: -1) {
         let directory = components.prefix(depth).joined(separator: "/")
-        let path = directory.isEmpty ? versionFileName : "\(directory)/\(versionFileName)"
-        let url = root.appendingPathComponent(path)
-        if FileManager.default.fileExists(atPath: url.path) {
-            return VersionFile(directory: directory, path: path, version: try readVersionFile(url))
+        for name in versionFileNames {
+            let path = directory.isEmpty ? name : "\(directory)/\(name)"
+            let url = root.appendingPathComponent(path)
+            if FileManager.default.fileExists(atPath: url.path) {
+                return VersionFile(directory: directory, path: path, version: try readVersionFile(url))
+            }
         }
     }
     return nil

@@ -1,5 +1,11 @@
 # GitVersion Changelog
 
+## 0.3.1
+
+- **`GitInfo.txt` is read as a version file.** Projects coming from GitInfo can
+  keep their existing file. It follows the same rules as `GitVersion.txt`, which
+  wins when both are in the same directory.
+
 ## 0.3.0
 
 - **Base versions follow a strict cascade.** GitVersion now reads a version from
